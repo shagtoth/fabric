@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
-	"github.com/danielmiessler/fabric/plugins/tools/youtube"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/danielmiessler/fabric/plugins/tools/youtube"
 
 	"github.com/danielmiessler/fabric/common"
 	"github.com/danielmiessler/fabric/core"
@@ -42,7 +44,10 @@ func Cli(version string) (err error) {
 		}
 	}
 
-	registry := core.NewPluginRegistry(fabricDb)
+	var registry *core.PluginRegistry
+	if registry, err = core.NewPluginRegistry(fabricDb); err != nil {
+		return
+	}
 
 	// if the setup flag is set, run the setup function
 	if currentFlags.Setup {
@@ -51,7 +56,14 @@ func Cli(version string) (err error) {
 	}
 
 	if currentFlags.Serve {
+		registry.ConfigureVendors()
 		err = restapi.Serve(registry, currentFlags.ServeAddress)
+		return
+	}
+
+	if currentFlags.ServeOllama {
+		registry.ConfigureVendors()
+		err = restapi.ServeOllama(registry, currentFlags.ServeAddress, version)
 		return
 	}
 
@@ -127,6 +139,21 @@ func Cli(version string) (err error) {
 		} else {
 			currentFlags.Message = msg
 		}
+	}
+
+	if currentFlags.ListExtensions {
+		err = registry.TemplateExtensions.ListExtensions()
+		return
+	}
+
+	if currentFlags.AddExtension != "" {
+		err = registry.TemplateExtensions.RegisterExtension(currentFlags.AddExtension)
+		return
+	}
+
+	if currentFlags.RemoveExtension != "" {
+		err = registry.TemplateExtensions.RemoveExtension(currentFlags.RemoveExtension)
+		return
 	}
 
 	// if the interactive flag is set, run the interactive function
@@ -260,7 +287,7 @@ func Cli(version string) (err error) {
 func processYoutubeVideo(
 	flags *Flags, registry *core.PluginRegistry, videoId string) (message string, err error) {
 
-	if !flags.YouTubeComments || flags.YouTubeTranscript {
+	if (!flags.YouTubeComments && !flags.YouTubeMetadata) || flags.YouTubeTranscript {
 		var transcript string
 		var language = "en"
 		if flags.Language != "" || registry.Language.DefaultLanguage.Value != "" {
@@ -286,6 +313,16 @@ func processYoutubeVideo(
 
 		message = AppendMessage(message, commentsString)
 	}
+
+	if flags.YouTubeMetadata {
+		var metadata *youtube.VideoMetadata
+		if metadata, err = registry.YouTube.GrabMetadata(videoId); err != nil {
+			return
+		}
+		metadataJson, _ := json.MarshalIndent(metadata, "", "  ")
+		message = AppendMessage(message, string(metadataJson))
+	}
+
 	return
 }
 
